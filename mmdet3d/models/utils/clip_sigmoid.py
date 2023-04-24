@@ -3,7 +3,7 @@ import torch
 from torch import Tensor
 
 
-def clip_sigmoid(x: Tensor, eps: float = 1e-4) -> Tensor:
+def clip_sigmoid(x: Tensor, eps: float = 1e-4, inplace: bool = True) -> Tensor:
     """Sigmoid function for input feature.
 
     Args:
@@ -14,5 +14,6 @@ def clip_sigmoid(x: Tensor, eps: float = 1e-4) -> Tensor:
     Returns:
         Tensor: Feature map after sigmoid.
     """
-    y = torch.clamp(x.sigmoid_(), min=eps, max=1 - eps)
+    x = x.sigmoid() if inplace else x.sigmoid_()
+    y = torch.clamp(x, min=eps, max=1 - eps)
     return y
