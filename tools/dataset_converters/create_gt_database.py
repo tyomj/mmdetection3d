@@ -189,7 +189,8 @@ def create_groundtruth_database(dataset_class_name,
                 dict(
                     type='LoadAnnotations3D',
                     with_bbox_3d=True,
-                    with_label_3d=True)
+                    with_label_3d=True,
+                    with_frustum=True)
             ])
 
     elif dataset_class_name == 'WaymoDataset':
@@ -243,6 +244,8 @@ def create_groundtruth_database(dataset_class_name,
         image_idx = example['sample_idx']
         points = example['points'].tensor.numpy()
         gt_boxes_3d = annos['gt_bboxes_3d'].tensor.numpy()
+        gt_frustums = annos['frustum']
+        assert gt_boxes_3d.shape[0] == gt_frustums.shape[0]
         names = [dataset.metainfo['classes'][i] for i in annos['gt_labels_3d']]
         group_dict = dict()
         if 'group_ids' in annos:
@@ -315,6 +318,7 @@ def create_groundtruth_database(dataset_class_name,
                     'image_idx': image_idx,
                     'gt_idx': i,
                     'box3d_lidar': gt_boxes_3d[i],
+                    'frustum': gt_frustums[i],
                     'num_points_in_gt': gt_points.shape[0],
                     'difficulty': difficulty[i],
                 }

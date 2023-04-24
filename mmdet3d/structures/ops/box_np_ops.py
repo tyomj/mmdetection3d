@@ -826,3 +826,62 @@ def boxes3d_to_corners3d_lidar(boxes3d, bottom_center=True):
         axis=2)
 
     return corners.astype(np.float32)
+
+
+def lidar_cartesian_to_spherical(points):
+    """Convert points from cartesian to spherical coordinates.
+
+    Note:
+        This function is for frustum extraction.
+
+    Args:
+        points (np.ndarray, shape=[N, 3]): Points in cartesian coordinates.
+
+    Returns:
+        np.ndarray, shape=[N, 3]: Points in spherical coordinates.
+    """
+    if points.ndim == 3:
+        points = points.reshape(-1, 3)
+    x, y, z = points.T
+    r = np.sqrt(x**2 + y**2 + z**2)
+    theta = np.arccos(z / r)
+    phi = (np.arctan(y / x) + (x < 0) * np.pi + 2 * np.pi) % (2 * np.pi)
+    return np.column_stack((r, theta, phi))
+
+
+def box_corners_to_frustum(points, nbr_boxes):
+    """Extract frustum from points.
+
+    Args:
+        points (np.ndarray, shape=[N, 3]): Points in cartesian
+            coordinates.
+        nbr_boxes (int): Number of boxes to extract.
+
+    Returns:
+        np.ndarray, shape=[nbr_boxes, 3, 2, 2]: Frustum array.
+    """
+    # convert points to spherical coordinates and reshape into boxes
+    box_corners_sph = lidar_cartesian_to_spherical(points).reshape(
+        nbr_boxes, 8, 3)
+    # create frustum array and set initial values for r, phi, theta
+    frustum = np.ones(
+        [nbr_boxes, 3, 2, 2],
+        dtype=np.float32) * -1  # (N, (r, phi, theta), (min, max), 2]
+    frustum[:, :, :, 0] = np.stack(
+        [box_corners_sph.min(axis=1),
+         box_corners_sph.max(axis=1)], axis=2)
+    val = (frustum[:, 2, 1, 0] - frustum[:, 2, 0, 0]) > np.pi
+    if val.any():
+        idxs = np.where(val > 0)[0]
+        frustum[val, 2, 0, 0] = 0.
+        frustum[val, 2, 1, 1] = np.pi * 2
+        for idx in idxs:
+            frustum[idx, 2, 1,
+                    0] = box_corners_sph[idx,
+                                         box_corners_sph[idx, :, 2] < np.pi,
+                                         2].max()
+            frustum[idx, 2, 0,
+                    1] = box_corners_sph[idx,
+                                         box_corners_sph[idx, :, 2] > np.pi,
+                                         2].min()
+    return frustum

@@ -328,6 +328,7 @@ class ObjectSample(BaseTransform):
     - gt_labels_3d
     - img (optional)
     - gt_bboxes (optional)
+    - frustum (optional)
 
     Modified Keys:
 
@@ -336,6 +337,7 @@ class ObjectSample(BaseTransform):
     - gt_labels_3d
     - img (optional)
     - gt_bboxes (optional)
+    - frustum (optional)
 
     Added Keys:
 
@@ -348,18 +350,22 @@ class ObjectSample(BaseTransform):
             Defaults to False.
         use_ground_plane (bool): Whether to use ground plane to adjust the
             3D labels. Defaults to False.
+        cross_modal (bool): Whether to use cross-modal augmentation.
+            Defaults to False.
     """
 
     def __init__(self,
                  db_sampler: dict,
                  sample_2d: bool = False,
-                 use_ground_plane: bool = False) -> None:
+                 use_ground_plane: bool = False,
+                 cross_modal: bool = False) -> None:
         self.sampler_cfg = db_sampler
         self.sample_2d = sample_2d
         if 'type' not in db_sampler.keys():
             db_sampler['type'] = 'DataBaseSampler'
         self.db_sampler = TRANSFORMS.build(db_sampler)
         self.use_ground_plane = use_ground_plane
+        self.cross_modal = cross_modal
         self.disabled = False
 
     @staticmethod
@@ -412,6 +418,13 @@ class ObjectSample(BaseTransform):
                 gt_labels_3d,
                 gt_bboxes_2d=gt_bboxes_2d,
                 img=img)
+        elif self.cross_modal:
+            frustum = input_dict['frustum']
+            sampled_dict = self.db_sampler.sample_all(
+                gt_bboxes_3d.tensor.numpy(),
+                gt_labels_3d,
+                gt_bboxes_frustum=frustum,
+                ground_plane=ground_plane)
         else:
             sampled_dict = self.db_sampler.sample_all(
                 gt_bboxes_3d.tensor.numpy(),

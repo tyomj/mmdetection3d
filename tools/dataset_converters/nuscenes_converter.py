@@ -14,6 +14,7 @@ from shapely.geometry import MultiPoint, box
 
 from mmdet3d.datasets.convert_utils import NuScenesNameMapping
 from mmdet3d.structures import points_cam2img
+from mmdet3d.structures.ops import box_np_ops
 
 nus_categories = ('car', 'truck', 'trailer', 'bus', 'construction_vehicle',
                   'bicycle', 'motorcycle', 'pedestrian', 'traffic_cone',
@@ -255,12 +256,25 @@ def _fill_trainval_infos(nusc,
             # we need to convert box size to
             # the format of our lidar coordinate system
             # which is x_size, y_size, z_size (corresponding to l, w, h)
-            gt_boxes = np.concatenate([locs, dims[:, [1, 0, 2]], rots], axis=1)
+            gt_boxes = np.concatenate([locs, dims[:, [1, 0, 2]], rots],
+                                      axis=1)  # N * 7
             assert len(gt_boxes) == len(
                 annotations), f'{len(gt_boxes)}, {len(annotations)}'
+
+            # get box frustum in lidar view
+            nbr_boxes = gt_boxes.shape[0]
+            corners_3d = box_np_ops.center_to_corner_box3d(
+                gt_boxes[:, :3],
+                gt_boxes[:, 3:6],
+                gt_boxes[:, 6], [0.5, 0.5, 0.5],
+                axis=1)  # N*8*3 (nbr_boxes*num_corners*x,y,z)
+            gt_frustum = box_np_ops.box_corners_to_frustum(
+                corners_3d, nbr_boxes)
+
             info['gt_boxes'] = gt_boxes
             info['gt_names'] = names
             info['gt_velocity'] = velocity.reshape(-1, 2)
+            info['gt_frustum'] = gt_frustum
             info['num_lidar_pts'] = np.array(
                 [a['num_lidar_pts'] for a in annotations])
             info['num_radar_pts'] = np.array(

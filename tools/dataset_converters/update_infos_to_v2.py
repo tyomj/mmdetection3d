@@ -50,6 +50,9 @@ def get_empty_instance():
         depth=None,
         #  (list[float], optional): Projected
         #  2D center of the 3D bounding box.
+        frustum=None,
+        # (list[float], optional): Projected
+        # corners of the 3D bounding box.
         center_2d=None,
         # (int, optional): Attribute labels
         # (fine-grained labels such as stopping, moving, ignore, crowd).
@@ -353,6 +356,8 @@ def update_nuscenes_infos(pkl_path, out_dir):
                 empty_instance['bbox_label_3d'] = copy.deepcopy(
                     empty_instance['bbox_label'])
                 empty_instance['velocity'] = ori_info_dict['gt_velocity'][
+                    i, :].tolist()
+                empty_instance['frustum'] = ori_info_dict['gt_frustum'][
                     i, :].tolist()
                 empty_instance['num_lidar_pts'] = ori_info_dict[
                     'num_lidar_pts'][i]

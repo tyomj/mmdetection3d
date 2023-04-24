@@ -755,6 +755,8 @@ class LoadAnnotations3D(LoadAnnotations):
           Only when `with_bbox` is True.
         - gt_labels (np.ndarray): Labels of ground truths.
           Only when `with_label` is True.
+        - frustum (np.ndarray): Frustum data of each instance.
+          Only when `with_frustum` is True.
         - depths (np.ndarray): Only when
           `with_bbox_depth` is True.
         - centers_2d (np.ndarray): Only when
@@ -780,6 +782,8 @@ class LoadAnnotations3D(LoadAnnotations):
       Only when `with_bbox` is True.
     - gt_labels (np.int64): Labels of ground truths.
       Only when `with_label` is True.
+    - frustum (np.ndarray): Frustum data of each instance.
+      Only when `with_frustum` is True.
     - depths (np.float32): Only when
       `with_bbox_depth` is True.
     - centers_2d (np.ndarray): Only when
@@ -807,6 +811,7 @@ class LoadAnnotations3D(LoadAnnotations):
         with_bbox_depth (bool): Whether to load 2.5D boxes. Defaults to False.
         with_panoptic_3d (bool): Whether to load 3D panoptic masks for points.
             Defaults to False.
+        with_frustum (bool): Whether to load frustum data. Defaults to False.
         poly2mask (bool): Whether to convert polygon annotations to bitmasks.
             Defaults to True.
         seg_3d_dtype (str): String of dtype of 3D semantic masks.
@@ -831,6 +836,7 @@ class LoadAnnotations3D(LoadAnnotations):
                  with_seg: bool = False,
                  with_bbox_depth: bool = False,
                  with_panoptic_3d: bool = False,
+                 with_frustum: bool = False,
                  poly2mask: bool = True,
                  seg_3d_dtype: str = 'np.int64',
                  seg_offset: int = None,
@@ -850,6 +856,7 @@ class LoadAnnotations3D(LoadAnnotations):
         self.with_mask_3d = with_mask_3d
         self.with_seg_3d = with_seg_3d
         self.with_panoptic_3d = with_panoptic_3d
+        self.with_frustum = with_frustum
         self.seg_3d_dtype = eval(seg_3d_dtype)
         self.seg_offset = seg_offset
         self.dataset_type = dataset_type
@@ -931,6 +938,18 @@ class LoadAnnotations3D(LoadAnnotations):
         # 'eval_ann_info' will be passed to evaluator
         if 'eval_ann_info' in results:
             results['eval_ann_info']['pts_instance_mask'] = pts_instance_mask
+        return results
+
+    def _load_frustum(self, results: dict) -> dict:
+        """Private function to load frustum annotations.
+
+        Args:
+            results (dict): Result dict from :obj:`mmcv.BaseDataset`.
+
+        Returns:
+            dict: The dict contains loaded frustum annotations.
+        """
+        results['frustum'] = results['ann_info']['frustum']
         return results
 
     def _load_semantic_seg_3d(self, results: dict) -> dict:
@@ -1058,6 +1077,8 @@ class LoadAnnotations3D(LoadAnnotations):
             results = self._load_masks_3d(results)
         if self.with_seg_3d:
             results = self._load_semantic_seg_3d(results)
+        if self.with_frustum:
+            results = self._load_frustum(results)
         return results
 
     def __repr__(self) -> str:
@@ -1069,6 +1090,7 @@ class LoadAnnotations3D(LoadAnnotations):
         repr_str += f'{indent_str}with_attr_label={self.with_attr_label}, '
         repr_str += f'{indent_str}with_mask_3d={self.with_mask_3d}, '
         repr_str += f'{indent_str}with_seg_3d={self.with_seg_3d}, '
+        repr_str += f'{indent_str}with_frustum={self.with_frustum}, '
         repr_str += f'{indent_str}with_panoptic_3d={self.with_panoptic_3d}, '
         repr_str += f'{indent_str}with_bbox={self.with_bbox}, '
         repr_str += f'{indent_str}with_label={self.with_label}, '

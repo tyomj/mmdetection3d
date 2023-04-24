@@ -203,6 +203,7 @@ class DataBaseSampler(object):
                    gt_bboxes: np.ndarray,
                    gt_labels: np.ndarray,
                    img: Optional[np.ndarray] = None,
+                   gt_bboxes_frustum: Optional[np.ndarray] = None,
                    ground_plane: Optional[np.ndarray] = None) -> dict:
         """Sampling all categories of bboxes.
 
@@ -210,6 +211,8 @@ class DataBaseSampler(object):
             gt_bboxes (np.ndarray): Ground truth bounding boxes.
             gt_labels (np.ndarray): Ground truth labels of boxes.
             img (np.ndarray, optional): Image array. Defaults to None.
+            gt_bboxes_frustum (np.ndarray, optional): Ground truth
+                bounding boxes in frustum. Defaults to None.
             ground_plane (np.ndarray, optional): Ground plane information.
                 Defaults to None.
 
@@ -222,6 +225,7 @@ class DataBaseSampler(object):
                   sampled ground truth 3D bounding boxes
                 - points (np.ndarray): sampled points
                 - group_ids (np.ndarray): ids of sampled ground truths
+                - gt_frustums (np.ndarray, optional): sampled gt frustums
         """
         sampled_num_dict = {}
         sample_num_per_class = []
@@ -238,30 +242,44 @@ class DataBaseSampler(object):
 
         sampled = []
         sampled_gt_bboxes = []
+        sampled_gt_frustums = []
         avoid_coll_boxes = gt_bboxes
+        avoid_coll_frustums = gt_bboxes_frustum
 
         for class_name, sampled_num in zip(self.sample_classes,
                                            sample_num_per_class):
             if sampled_num > 0:
                 sampled_cls = self.sample_class_v2(class_name, sampled_num,
-                                                   avoid_coll_boxes)
+                                                   avoid_coll_boxes,
+                                                   avoid_coll_frustums)
 
                 sampled += sampled_cls
                 if len(sampled_cls) > 0:
                     if len(sampled_cls) == 1:
                         sampled_gt_box = sampled_cls[0]['box3d_lidar'][
                             np.newaxis, ...]
+                        if gt_bboxes_frustum is not None:
+                            sampled_gt_frustum = sampled_cls[0]['frustum'][
+                                np.newaxis, ...]
                     else:
                         sampled_gt_box = np.stack(
                             [s['box3d_lidar'] for s in sampled_cls], axis=0)
+                        if gt_bboxes_frustum is not None:
+                            sampled_gt_frustum = np.stack(
+                                [s['frustum'] for s in sampled_cls], axis=0)
 
                     sampled_gt_bboxes += [sampled_gt_box]
                     avoid_coll_boxes = np.concatenate(
                         [avoid_coll_boxes, sampled_gt_box], axis=0)
+                    if gt_bboxes_frustum is not None:
+                        sampled_gt_frustums += [sampled_gt_frustum]
+                        avoid_coll_frustums = np.concatenate(
+                            [avoid_coll_frustums, sampled_gt_frustum], axis=0)
 
         ret = None
         if len(sampled) > 0:
             sampled_gt_bboxes = np.concatenate(sampled_gt_bboxes, axis=0)
+            sampled_gt_frustums = np.concatenate(sampled_gt_frustums, axis=0)
             # center = sampled_gt_bboxes[:, 0:3]
 
             # num_sampled = len(sampled)
@@ -302,16 +320,74 @@ class DataBaseSampler(object):
                           gt_bboxes.shape[0] + len(sampled))
             }
 
+            if gt_bboxes_frustum is not None:
+                ret['gt_frustums'] = sampled_gt_frustums
+
         return ret
 
-    def sample_class_v2(self, name: str, num: int,
-                        gt_bboxes: np.ndarray) -> List[dict]:
+    def frustum_collision_test(self, gt_frustums, sp_frustums, thresh=0.7):
+        # calculate iou
+        N = gt_frustums.shape[0]
+        K = sp_frustums.shape[0]
+        gt_frustums_all = np.concatenate([gt_frustums, sp_frustums], axis=0)
+        S = np.array([(cur_frus[1, 1, 0] - cur_frus[1, 0, 0]) *
+                      (cur_frus[2, 1, 0] - cur_frus[2, 0, 0] +
+                       cur_frus[2, 1, 1] - cur_frus[2, 0, 1])
+                      for cur_frus in gt_frustums_all],
+                     dtype=np.float32)
+        # assert S.any() > 0
+        ret = np.zeros((N + K, N + K), dtype=np.float32)
+        for i in range(N + K):
+            for j in range(K):
+                sp_frus = [sp_frustums[j, :, :, 0]
+                           ] if sp_frustums[j, 2, 0, 1] < 0 else [
+                               sp_frustums[j, :, :, 0], sp_frustums[j, :, :, 1]
+                           ]
+                gt_frus = [gt_frustums_all[i, :, :, 0]
+                           ] if gt_frustums_all[i, 2, 0, 1] < 0 else [
+                               gt_frustums_all[i, :, :,
+                                               0], gt_frustums_all[i, :, :, 1]
+                           ]
+                iou = 0
+                for cur_sp_frus in sp_frus:
+                    for cur_gt_frus in gt_frus:
+                        coll = ((max(cur_sp_frus[2, 0], cur_gt_frus[2, 0]) <
+                                 min(cur_sp_frus[2, 1], cur_gt_frus[2, 1]))
+                                and (max(sp_frustums[j, 1, 0, 0],
+                                         gt_frustums_all[i, 1, 0, 0]) < min(
+                                             sp_frustums[j, 1, 1, 0],
+                                             gt_frustums_all[i, 1, 1, 0])))
+                        if coll:
+                            iou += (
+                                min(cur_sp_frus[2, 1], cur_gt_frus[2, 1]) -
+                                max(cur_sp_frus[2, 0], cur_gt_frus[2, 0])) * (
+                                    min(sp_frustums[j, 1, 1, 0],
+                                        gt_frustums_all[i, 1, 1, 0]) -
+                                    max(sp_frustums[j, 1, 0, 0],
+                                        gt_frustums_all[i, 1, 0, 0]))
+                            # assert iou > 0
+
+                iou_per = iou / min(S[i], S[j + N])
+                # assert iou_per <= 1.01
+                ret[i, j + N] = iou_per
+                ret[j + N, i] = iou_per
+
+        ret = ret > thresh
+        return ret
+
+    def sample_class_v2(
+            self,
+            name: str,
+            num: int,
+            gt_bboxes: np.ndarray,
+            gt_bboxes_frustum: Optional[np.ndarray] = None) -> List[dict]:
         """Sampling specific categories of bounding boxes.
 
         Args:
             name (str): Class of objects to be sampled.
             num (int): Number of sampled bboxes.
             gt_bboxes (np.ndarray): Ground truth boxes.
+            gt_bboxes_frustum (np.ndarray, optional): Ground truth frustums.
 
         Returns:
             list[dict]: Valid samples after collision test.
@@ -332,6 +408,12 @@ class DataBaseSampler(object):
 
         total_bv = np.concatenate([gt_bboxes_bv, sp_boxes_bv], axis=0)
         coll_mat = data_augment_utils.box_collision_test(total_bv, total_bv)
+        if gt_bboxes_frustum is not None:
+            sp_frustums = np.stack([i['frustum'] for i in sampled], axis=0)
+            frustum_coll_mat = self.frustum_collision_test(
+                gt_bboxes_frustum, sp_frustums)
+            coll_mat = np.logical_or(coll_mat, frustum_coll_mat)
+
         diag = np.arange(total_bv.shape[0])
         coll_mat[diag, diag] = False
 
