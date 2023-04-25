@@ -9,7 +9,7 @@ from torch import Tensor
 from torch import nn as nn
 
 from mmdet3d.registry import TASK_UTILS
-from mmdet3d.utils.typing import InstanceList
+from mmdet3d.utils.typing_utils import InstanceList
 
 
 @TASK_UTILS.register_module()

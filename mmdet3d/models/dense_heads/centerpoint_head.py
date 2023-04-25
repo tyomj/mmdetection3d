@@ -13,7 +13,7 @@ from mmdet3d.models.utils import (clip_sigmoid, draw_heatmap_gaussian,
                                   gaussian_radius)
 from mmdet3d.registry import MODELS, TASK_UTILS
 from mmdet3d.structures import Det3DDataSample, xywhr2xyxyr
-from mmdet3d.utils.typing import SampleList
+from mmdet3d.utils.typing_utils import SampleList
 from ..layers import circle_nms, nms_bev
 
 

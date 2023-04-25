@@ -8,6 +8,7 @@ from .fusion_layers import (PointFusion, VoteFusion, apply_3d_transformation,
 from .mlp import MLP
 from .norm import NaiveSyncBatchNorm1d, NaiveSyncBatchNorm2d
 from .paconv import PAConv, PAConvCUDA
+from .point_sampler import FPSSampler, SPCSampler
 from .pointnet_modules import (PAConvCUDASAModule, PAConvCUDASAModuleMSG,
                                PAConvSAModule, PAConvSAModuleMSG,
                                PointFPModule, PointSAModule, PointSAModuleMSG,
@@ -28,5 +29,5 @@ __all__ = [
     'nms_normal_bev', 'build_sa_module', 'PointSAModuleMSG', 'PointSAModule',
     'PointFPModule', 'PAConvSAModule', 'PAConvSAModuleMSG',
     'PAConvCUDASAModule', 'PAConvCUDASAModuleMSG', 'TorchSparseConvModule',
-    'TorchSparseResidualBlock'
+    'TorchSparseResidualBlock', 'FPSSampler', 'SPCSampler'
 ]

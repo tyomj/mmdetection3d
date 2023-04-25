@@ -7,7 +7,7 @@ import torch.nn as nn
 from mmcv.cnn import ConvModule
 from mmengine.model import BaseModule
 
-from mmdet3d.registry import MODELS
+from mmdet3d.registry import MODELS, TASK_UTILS
 from mmdet3d.utils import InstanceList
 
 
@@ -72,7 +72,7 @@ class VoxelSetAbstraction(BaseModule):
 
     def __init__(self,
                  keypoints_sampler: dict = dict(
-                     'FPSSampler', num_keypoints=2048),
+                     type='FPSSampler', num_keypoints=2048),
                  fused_out_channel: int = 128,
                  voxel_size: list = [0.05, 0.05, 0.1],
                  point_cloud_range: list = [0, -40, -3, 70.4, 40, 1],
@@ -84,7 +84,7 @@ class VoxelSetAbstraction(BaseModule):
                  norm_cfg: dict = dict(type='BN2d', eps=1e-5, momentum=0.1),
                  bias: str = 'auto') -> None:
         super().__init__()
-        self.keypoints_sampler = MODELS.build(keypoints_sampler)
+        self.keypoints_sampler = TASK_UTILS.build(keypoints_sampler)
         self.fused_out_channel = fused_out_channel
         self.voxel_size = voxel_size
         self.point_cloud_range = point_cloud_range
