@@ -297,6 +297,7 @@ class CenterHead(BaseModule):
                  train_cfg: Optional[dict] = None,
                  test_cfg: Optional[dict] = None,
                  init_cfg: Optional[dict] = None,
+                 num_classes: Optional[List[int]] = None,
                  **kwargs):
         assert init_cfg is None, 'To prevent abnormal initialization ' \
             'behavior, init_cfg is not allowed to be set'
@@ -570,7 +571,8 @@ class CenterHead(BaseModule):
                     ind[new_idx] = y * feature_map_size[0] + x
                     mask[new_idx] = 1
                     # TODO: support other outdoor dataset
-                    vx, vy = task_boxes[idx][k][7:]
+                    if gt_bboxes_dim == 9:
+                        vx, vy = task_boxes[idx][k][7:]
                     rot = task_boxes[idx][k][6]
                     box_dim = task_boxes[idx][k][3:6]
                     if self.norm_bbox:
@@ -581,8 +583,8 @@ class CenterHead(BaseModule):
                         box_dim,
                         torch.sin(rot).unsqueeze(0),
                         torch.cos(rot).unsqueeze(0),
-                    ] + [vx.unsqueeze(0), vy.unsqueeze(0)] if gt_bboxes_dim ==
-                                                  9 else [])
+                    ] + ([vx.unsqueeze(0), vy.unsqueeze(0)] if gt_bboxes_dim ==
+                         9 else []))
 
             heatmaps.append(heatmap)
             anno_boxes.append(anno_box)
@@ -647,7 +649,7 @@ class CenterHead(BaseModule):
                 [
                     preds_dict[0]['reg'], preds_dict[0]['height'],
                     preds_dict[0]['dim'], preds_dict[0]['rot']
-                ] + [preds_dict[0]['vel']] if anno_box_dim == 10 else [],
+                ] + ([preds_dict[0]['vel']] if anno_box_dim == 10 else []),
                 dim=1)
 
             # Regression loss for dimension, offset, height, rotation
@@ -661,6 +663,10 @@ class CenterHead(BaseModule):
             mask *= isnotnan
 
             code_weights = self.train_cfg.get('code_weights', None)
+            if code_weights is None:
+                code_weights = [1.0] * anno_box_dim
+            else:
+                assert len(code_weights) == anno_box_dim
             bbox_weights = mask * mask.new_tensor(code_weights)
             loss_bbox = self.loss_bbox(
                 pred, target_box, bbox_weights, avg_factor=(num + 1e-4))

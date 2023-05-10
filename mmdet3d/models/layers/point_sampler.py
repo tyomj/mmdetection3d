@@ -57,7 +57,7 @@ class SPCSampler(nn.Module):
     Args:
         num_keypoints (int): Num of key points which sampler
             from raw points cloud.
-        roi_neighbour_radius (float): Sample neighbour points radius
+        roi_neighbor_radius (float): Sample neighbor points radius
             of each roi boxes.
         num_sectors (int): Divide 3D space into `num_sectors` sectors.
         part_max_points_num (int): Max points num in each part.
@@ -67,13 +67,13 @@ class SPCSampler(nn.Module):
     def __init__(
         self,
         num_keypoints: int,
-        roi_neighbour_radius: float,
+        roi_neighbor_radius: float,
         num_sectors: int,
         part_max_points_num: int = 200000,
     ) -> None:
         super().__init__()
         self.num_keypoints = num_keypoints
-        self.roi_neighbour_radius = roi_neighbour_radius
+        self.roi_neighbor_radius = roi_neighbor_radius
         self.part_max_points_num = part_max_points_num
         self.num_sectors = num_sectors
 
@@ -98,7 +98,7 @@ class SPCSampler(nn.Module):
             roi_max_dim = (rois[min_dis_roi_idx, 3:6] / 2).norm(dim=-1)
             # TODO: check types
             point_mask = \
-                min_dis < roi_max_dim + self.roi_neighbour_radius
+                min_dis < roi_max_dim + self.roi_neighbor_radius
         else:
             start_idx = 0
             point_mask_list = []
@@ -109,7 +109,7 @@ class SPCSampler(nn.Module):
                 min_dis, min_dis_roi_idx = distance.min(dim=-1)
                 roi_max_dim = (rois[min_dis_roi_idx, 3:6] / 2).norm(dim=-1)
                 cur_point_mask = \
-                    min_dis < roi_max_dim + self.roi_neighbour_radius
+                    min_dis < roi_max_dim + self.roi_neighbor_radius
                 point_mask_list.append(cur_point_mask)
                 start_idx += self.part_max_points_num
             point_mask = torch.cat(point_mask_list, dim=0)
@@ -183,29 +183,29 @@ class SPCSampler(nn.Module):
         return sampled_points
 
     def forward(self, points_list: List[Tensor],
-                roi_boxes_list: InstanceList) -> List[Tensor]:
+                rpn_results_list: InstanceList) -> List[Tensor]:
         """Sample key points by Sectorized Proposal-Centric Sampling function.
 
         Args:
             points_list (List[torch.Tensor]): Input batch points cloud list.
-            roi_boxes_list (List[:obj:`InstanceData`]): A list include batch
+            rpn_results_list (List[:obj:`InstanceData`]): A list include batch
                 roi boxes.
 
         Returns:
             List[torch.Tensor]: Batch sampled points results.
         """
         key_points_list = []
-        for i in range(len(roi_boxes_list)):
-            boxes = roi_boxes_list[i]
+        for i in range(len(rpn_results_list)):
+            boxes = rpn_results_list[i]
             gemo_center_boxes = boxes.bboxes_3d.tensor.clone()
             gemo_center_boxes[:, 2] = \
-                gemo_center_boxes.bboxes_3d.tensor[:, 2] + \
-                gemo_center_boxes.bboxes_3d.tensor[:, 5] / 2
-            roi_boxes_list[i] = gemo_center_boxes
+                boxes.bboxes_3d.tensor[:, 2] + \
+                boxes.bboxes_3d.tensor[:, 5] / 2
+            rpn_results_list[i] = gemo_center_boxes
         for batch_idx in range(len(points_list)):
             points = points_list[batch_idx]
             cur_keypoints = self.sectorized_proposal_centric_sampling(
-                roi_boxes=roi_boxes_list[batch_idx], points=points)
+                roi_boxes=rpn_results_list[batch_idx], points=points)
             num_points = cur_keypoints.shape[0]
             if num_points < self.num_keypoints:
                 times = int(self.num_keypoints / num_points) + 1

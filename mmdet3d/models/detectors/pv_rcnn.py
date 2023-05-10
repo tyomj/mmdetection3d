@@ -221,9 +221,8 @@ class PointVoxelRCNN(TwoStage3DDetector):
                 data_sample.proposals for data_sample in batch_data_samples
             ]
 
-        points_feats_dict = self.extract_points_feat(batch_inputs_dict,
-                                                     feats_dict,
-                                                     rpn_results_list)
+        points_feats_dict = self.extract_points_feat(
+            batch_inputs_dict, feats_dict, copy.deepcopy(rpn_results_list))
 
         roi_losses = self.roi_head.loss(points_feats_dict, rpn_results_list,
                                         batch_data_samples)
