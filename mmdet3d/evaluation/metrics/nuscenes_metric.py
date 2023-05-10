@@ -48,6 +48,8 @@ class NuScenesMetric(BaseMetric):
             'gpu'. Defaults to 'cpu'.
         backend_args (dict, optional): Arguments to instantiate the
             corresponding backend. Defaults to None.
+        with_velocity (bool): Whether to evaluate the velocity.
+            Defaults to True.
     """
     NameMapping = {
         'movable_object.barrier': 'barrier',
@@ -96,7 +98,8 @@ class NuScenesMetric(BaseMetric):
                  jsonfile_prefix: Optional[str] = None,
                  eval_version: str = 'detection_cvpr_2019',
                  collect_device: str = 'cpu',
-                 backend_args: Optional[dict] = None) -> None:
+                 backend_args: Optional[dict] = None,
+                 with_velocity: bool = True) -> None:
         self.default_prefix = 'NuScenes metric'
         super(NuScenesMetric, self).__init__(
             collect_device=collect_device, prefix=prefix)
@@ -116,6 +119,7 @@ class NuScenesMetric(BaseMetric):
 
         self.jsonfile_prefix = jsonfile_prefix
         self.backend_args = backend_args
+        self.with_velocity = with_velocity
 
         self.metrics = metric if isinstance(metric, list) else [metric]
 
@@ -407,7 +411,8 @@ class NuScenesMetric(BaseMetric):
 
             # need to merge results from images of the same sample
             annos = []
-            boxes, attrs = output_to_nusc_box(det)
+            boxes, attrs = output_to_nusc_box(
+                det, with_velocity=self.with_velocity)
             sample_token = self.data_infos[frame_sample_idx]['token']
             camera_type = camera_types[camera_type_id]
             boxes, attrs = cam_nusc_box_to_global(
@@ -421,7 +426,8 @@ class NuScenesMetric(BaseMetric):
             boxes = global_nusc_box_to_cam(self.data_infos[frame_sample_idx],
                                            boxes_per_frame, classes,
                                            self.eval_detection_configs)
-            cam_boxes3d, scores, labels = nusc_box_to_cam_box3d(boxes)
+            cam_boxes3d, scores, labels = nusc_box_to_cam_box3d(
+                boxes, with_velocity=self.with_velocity)
             # box nms 3d over 6 images in a frame
             # TODO: move this global setting into config
             nms_cfg = dict(
@@ -447,7 +453,8 @@ class NuScenesMetric(BaseMetric):
                 mlvl_attr_scores=attrs)
             cam_boxes3d = CameraInstance3DBoxes(boxes3d, box_dim=9)
             det = bbox3d2result(cam_boxes3d, scores, labels, attrs)
-            boxes, attrs = output_to_nusc_box(det)
+            boxes, attrs = output_to_nusc_box(
+                det, with_velocity=self.with_velocity)
             boxes, attrs = cam_nusc_box_to_global(
                 self.data_infos[frame_sample_idx], boxes, attrs, classes,
                 self.eval_detection_configs)
@@ -506,7 +513,8 @@ class NuScenesMetric(BaseMetric):
         print('Start to convert detection format...')
         for i, det in enumerate(mmengine.track_iter_progress(results)):
             annos = []
-            boxes, attrs = output_to_nusc_box(det)
+            boxes, attrs = output_to_nusc_box(
+                det, with_velocity=self.with_velocity)
             sample_idx = sample_idx_list[i]
             sample_token = self.data_infos[sample_idx]['token']
             boxes = lidar_nusc_box_to_global(self.data_infos[sample_idx],
@@ -558,7 +566,9 @@ class NuScenesMetric(BaseMetric):
 
 
 def output_to_nusc_box(
-        detection: dict) -> Tuple[List[NuScenesBox], Union[np.ndarray, None]]:
+    detection: dict,
+    with_velocity: bool = True
+) -> Tuple[List[NuScenesBox], Union[np.ndarray, None]]:
     """Convert the output to the box class in the nuScenes.
 
     Args:
@@ -567,6 +577,8 @@ def output_to_nusc_box(
             - bboxes_3d (:obj:`BaseInstance3DBoxes`): Detection bbox.
             - scores_3d (torch.Tensor): Detection scores.
             - labels_3d (torch.Tensor): Predicted box labels.
+        with_velocity (bool, optional): Whether velocity is taken from boxes
+            or zero padding is used. Defaults to True.
 
     Returns:
         Tuple[List[:obj:`NuScenesBox`], np.ndarray or None]: List of standard
@@ -590,7 +602,10 @@ def output_to_nusc_box(
         nus_box_dims = box_dims[:, [1, 0, 2]]
         for i in range(len(bbox3d)):
             quat = pyquaternion.Quaternion(axis=[0, 0, 1], radians=box_yaw[i])
-            velocity = (*bbox3d.tensor[i, 7:9], 0.0)
+            if with_velocity:
+                velocity = (*bbox3d.tensor[i, 7:9], 0.0)
+            else:
+                velocity = (0.0, 0.0, 0.0)
             # velo_val = np.linalg.norm(box3d[i, 7:9])
             # velo_ori = box3d[i, 6]
             # velocity = (
@@ -756,12 +771,15 @@ def global_nusc_box_to_cam(info: dict, boxes: List[NuScenesBox],
 
 
 def nusc_box_to_cam_box3d(
-    boxes: List[NuScenesBox]
+    boxes: List[NuScenesBox],
+    with_velocity: bool = True
 ) -> Tuple[CameraInstance3DBoxes, torch.Tensor, torch.Tensor]:
     """Convert boxes from :obj:`NuScenesBox` to :obj:`CameraInstance3DBoxes`.
 
     Args:
         boxes (:obj:`List[NuScenesBox]`): List of predicted NuScenesBoxes.
+        with_velocity (bool): Whether velocity is taken from boxes
+            or zero padding is used. Defaults to True.
 
     Returns:
         Tuple[:obj:`CameraInstance3DBoxes`, torch.Tensor, torch.Tensor]:
@@ -771,7 +789,10 @@ def nusc_box_to_cam_box3d(
     dims = torch.Tensor([b.wlh for b in boxes]).view(-1, 3)
     rots = torch.Tensor([b.orientation.yaw_pitch_roll[0]
                          for b in boxes]).view(-1, 1)
-    velocity = torch.Tensor([b.velocity[0::2] for b in boxes]).view(-1, 2)
+    if with_velocity:
+        velocity = torch.Tensor([b.velocity[0::2] for b in boxes]).view(-1, 2)
+    else:
+        velocity = torch.zeros(locs.shape[0], 2)
 
     # convert nusbox to cambox convention
     dims[:, [0, 1, 2]] = dims[:, [1, 2, 0]]

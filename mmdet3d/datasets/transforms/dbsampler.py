@@ -90,6 +90,8 @@ class DataBaseSampler(object):
         prepare (dict): Name of preparation functions and the input value.
         sample_groups (dict): Sampled classes and numbers.
         classes (list[str], optional): List of classes. Defaults to None.
+        bbox_code_size (int, optional): The number of bbox dimensions.
+            Default: None.
         points_loader (dict): Config of points loader. Defaults to
             dict(type='LoadPointsFromFile', load_dim=4, use_dim=[0, 1, 2, 3]).
         backend_args (dict, optional): Arguments to instantiate the
@@ -103,6 +105,7 @@ class DataBaseSampler(object):
                  prepare: dict,
                  sample_groups: dict,
                  classes: Optional[List[str]] = None,
+                 bbox_code_size: Optional[int] = None,
                  points_loader: dict = dict(
                      type='LoadPointsFromFile',
                      coord_type='LIDAR',
@@ -139,6 +142,13 @@ class DataBaseSampler(object):
             logger.info(f'load {len(v)} {k} database infos in DataBaseSampler')
 
         self.db_infos = db_infos
+
+        self.bbox_code_size = bbox_code_size
+        if bbox_code_size is not None:
+            for k, info_cls in self.db_infos.items():
+                for info in info_cls:
+                    info['box3d_lidar'] = info['box3d_lidar'][:self.
+                                                              bbox_code_size]
 
         # load sample groups
         # TODO: more elegant way to load sample groups
