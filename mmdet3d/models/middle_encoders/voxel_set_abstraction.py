@@ -1,4 +1,5 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import copy
 from typing import List, Optional
 
 import mmengine
@@ -7,7 +8,7 @@ import torch.nn as nn
 from mmcv.cnn import ConvModule
 from mmengine.model import BaseModule
 
-from mmdet3d.registry import MODELS
+from mmdet3d.registry import MODELS, TASK_UTILS
 from mmdet3d.utils import InstanceList
 
 
@@ -72,7 +73,7 @@ class VoxelSetAbstraction(BaseModule):
 
     def __init__(self,
                  keypoints_sampler: dict = dict(
-                     'FPSSampler', num_keypoints=2048),
+                     type='FPSSampler', num_keypoints=2048),
                  fused_out_channel: int = 128,
                  voxel_size: list = [0.05, 0.05, 0.1],
                  point_cloud_range: list = [0, -40, -3, 70.4, 40, 1],
@@ -84,7 +85,7 @@ class VoxelSetAbstraction(BaseModule):
                  norm_cfg: dict = dict(type='BN2d', eps=1e-5, momentum=0.1),
                  bias: str = 'auto') -> None:
         super().__init__()
-        self.keypoints_sampler = MODELS.build(keypoints_sampler)
+        self.keypoints_sampler = TASK_UTILS.build(keypoints_sampler)
         self.fused_out_channel = fused_out_channel
         self.voxel_size = voxel_size
         self.point_cloud_range = point_cloud_range
@@ -245,7 +246,9 @@ class VoxelSetAbstraction(BaseModule):
                 - fusion_keypoint_features (torch.Tensor): Fusion
                     keypoint_features by point_feature_fusion_layer.
         """
-        roi_boxes_list = [res.bboxes_3d.tensor for res in rpn_results_list]
+        roi_boxes_list = [
+            res.bboxes_3d.tensor for res in copy.deepcopy(rpn_results_list)
+        ]
         points = batch_inputs_dict['points']
         voxel_encode_features = feats_dict['multi_scale_3d_feats']
         bev_encode_features = feats_dict['spatial_feats']
@@ -254,7 +257,7 @@ class VoxelSetAbstraction(BaseModule):
         else:
             voxels_coors = None
         keypoints = self.sample_key_points(points, voxels_coors,
-                                           rpn_results_list)
+                                           copy.deepcopy(rpn_results_list))
 
         point_features_list = []
         batch_size = len(points)

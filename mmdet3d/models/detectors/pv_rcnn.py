@@ -91,17 +91,16 @@ class PointVoxelRCNN(TwoStage3DDetector):
         """
         feats_dict = self.extract_feat(batch_inputs_dict)
         if self.with_rpn:
-            rpn_results_list = self.rpn_head.predict(feats_dict,
-                                                     batch_data_samples)
+            rpn_results_list = self.rpn_head.predict(
+                feats_dict, copy.deepcopy(batch_data_samples))
         else:
             rpn_results_list = [
                 data_sample.proposals for data_sample in batch_data_samples
             ]
 
         # extrack points feats by points_encoder
-        points_feats_dict = self.extract_points_feat(batch_inputs_dict,
-                                                     feats_dict,
-                                                     rpn_results_list)
+        points_feats_dict = self.extract_points_feat(
+            batch_inputs_dict, feats_dict, copy.deepcopy(rpn_results_list))
 
         results_list_3d = self.roi_head.predict(points_feats_dict,
                                                 rpn_results_list,
@@ -221,9 +220,8 @@ class PointVoxelRCNN(TwoStage3DDetector):
                 data_sample.proposals for data_sample in batch_data_samples
             ]
 
-        points_feats_dict = self.extract_points_feat(batch_inputs_dict,
-                                                     feats_dict,
-                                                     rpn_results_list)
+        points_feats_dict = self.extract_points_feat(
+            batch_inputs_dict, feats_dict, copy.deepcopy(rpn_results_list))
 
         roi_losses = self.roi_head.loss(points_feats_dict, rpn_results_list,
                                         batch_data_samples)

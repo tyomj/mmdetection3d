@@ -154,7 +154,8 @@ class StackedSAModuleMSG(BaseModule):
                 xyz_batch_cnt: Tensor,
                 new_xyz: Tensor,
                 new_xyz_batch_cnt: Tensor,
-                features: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
+                features: Optional[Tensor] = None,
+                **kwargs) -> Tuple[Tensor, Tensor]:
         """Forward.
 
         Args:
