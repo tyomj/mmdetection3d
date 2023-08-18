@@ -23,7 +23,8 @@ TwoTupleIntType = Tuple[Tuple[int]]
 
 @MODELS.register_module()
 class SparseEncoder(nn.Module):
-    r"""Sparse encoder for SECOND and Part-A2.
+    r"""Sparse 3D encoder for SECOND and Part-A2.
+    Sparse 2D encoder for PillarNeXt.
 
     Args:
         in_channels (int): The number of input channels.
@@ -46,6 +47,18 @@ class SparseEncoder(nn.Module):
             Defaults to 'conv_module'.
         return_middle_feats (bool): Whether output middle features.
             Default to False.
+        conv_dim (int, optional): The dimension of the conv layer.
+            Either 2 or 3. Defaults to 3.
+        last_kernel_size (tuple[int], optional): The kernel size of the last
+            conv layer. Defaults to (3, 1, 1).
+        last_stride (tuple[int], optional): The stride of the last conv layer.
+            Defaults to (2, 1, 1).
+        last_padding (tuple[int], optional): The padding of the last conv
+            layer. Defaults to (1, 0, 0).
+        sparse_conv_first (bool, optional): Whether to use sparse conv before
+            SparseBasicBlock. Defaults to False.
+        conv_input_type (str, optional): The type of the conv_input layer.
+            Defaults to 'SubMConv'. Options are 'SubMConv', 'SparseConv'.
     """
 
     def __init__(
@@ -65,7 +78,13 @@ class SparseEncoder(nn.Module):
                                                            (1, 1, 1),
                                                            ((0, 1, 1), 1, 1)),
             block_type: Optional[str] = 'conv_module',
-            return_middle_feats: Optional[bool] = False):
+            return_middle_feats: Optional[bool] = False,
+            conv_dim: int = 3,
+            last_kernel_size: Optional[Tuple[int]] = (3, 1, 1),
+            last_stride: Optional[Tuple[int]] = (2, 1, 1),
+            last_padding: Optional[Tuple[int]] = (1, 0, 0),
+            sparse_conv_first: Optional[bool] = False,
+            conv_input_type: Optional[str] = 'SubMConv'):
         super().__init__()
         assert block_type in ['conv_module', 'basicblock']
         self.sparse_shape = sparse_shape
@@ -77,11 +96,20 @@ class SparseEncoder(nn.Module):
         self.encoder_paddings = encoder_paddings
         self.stage_num = len(self.encoder_channels)
         self.return_middle_feats = return_middle_feats
+        self.conv_dim = conv_dim
+        self.last_kernel_size = last_kernel_size
+        self.last_stride = last_stride
+        self.last_padding = last_padding
+        self.sparse_conv_first = sparse_conv_first
         # Spconv init all weight on its own
 
         assert isinstance(order, tuple) and len(order) == 3
         assert set(order) == {'conv', 'norm', 'act'}
+        assert conv_dim in (2, 3), 'conv_dim should be 2 or 3'
+        if conv_dim == 2:
+            assert len(self.sparse_shape) == 2, 'sparse_shape should be 2D'
 
+        conv_input_type = f'{conv_input_type}{conv_dim}d'
         if self.order[0] != 'conv':  # pre activate
             self.conv_input = make_sparse_convmodule(
                 in_channels,
@@ -90,7 +118,7 @@ class SparseEncoder(nn.Module):
                 norm_cfg=norm_cfg,
                 padding=1,
                 indice_key='subm1',
-                conv_type='SubMConv3d',
+                conv_type=conv_input_type,
                 order=('conv', ))
         else:  # post activate
             self.conv_input = make_sparse_convmodule(
@@ -100,23 +128,25 @@ class SparseEncoder(nn.Module):
                 norm_cfg=norm_cfg,
                 padding=1,
                 indice_key='subm1',
-                conv_type='SubMConv3d')
+                conv_type=conv_input_type)
 
         encoder_out_channels = self.make_encoder_layers(
             make_sparse_convmodule,
             norm_cfg,
             self.base_channels,
-            block_type=block_type)
+            block_type=block_type,
+            conv_cfg=dict(type=f'SubMConv{conv_dim}d'),
+        )
 
         self.conv_out = make_sparse_convmodule(
             encoder_out_channels,
             self.output_channels,
-            kernel_size=(3, 1, 1),
-            stride=(2, 1, 1),
+            kernel_size=last_kernel_size,
+            stride=last_stride,
             norm_cfg=norm_cfg,
-            padding=0,
+            padding=last_padding,
             indice_key='spconv_down2',
-            conv_type='SparseConv3d')
+            conv_type=f'SparseConv{conv_dim}d')
 
     @amp.autocast(enabled=False)
     def forward(self, voxel_features: Tensor, coors: Tensor,
@@ -140,6 +170,10 @@ class SparseEncoder(nn.Module):
                 module returns middle features.
         """
         coors = coors.int()
+        if self.conv_dim == 2:
+            # For pillar-based methods, we only use x and y coordinates
+            indices = torch.tensor([0, 2, 3]).to(coors.device)
+            coors = torch.index_select(coors, dim=1, index=indices)
         input_sp_tensor = SparseConvTensor(voxel_features, coors,
                                            self.sparse_shape, batch_size)
         x = self.conv_input(input_sp_tensor)
@@ -154,8 +188,9 @@ class SparseEncoder(nn.Module):
         out = self.conv_out(encode_features[-1])
         spatial_features = out.dense()
 
-        N, C, D, H, W = spatial_features.shape
-        spatial_features = spatial_features.view(N, C * D, H, W)
+        if self.conv_dim == 3:
+            N, C, D, H, W = spatial_features.shape
+            spatial_features = spatial_features.view(N, C * D, H, W)
 
         if self.return_middle_feats:
             return spatial_features, encode_features
@@ -203,10 +238,11 @@ class SparseEncoder(nn.Module):
                             stride=2,
                             padding=padding,
                             indice_key=f'spconv{i + 1}',
-                            conv_type='SparseConv3d'))
+                            conv_type=f'SparseConv{self.conv_dim}d'))
                 elif block_type == 'basicblock':
-                    if j == len(blocks) - 1 and i != len(
-                            self.encoder_channels) - 1:
+                    if not self.sparse_conv_first and j == len(
+                            blocks) - 1 and i != len(
+                                self.encoder_channels) - 1:
                         blocks_list.append(
                             make_block(
                                 in_channels,
@@ -216,7 +252,18 @@ class SparseEncoder(nn.Module):
                                 stride=2,
                                 padding=padding,
                                 indice_key=f'spconv{i + 1}',
-                                conv_type='SparseConv3d'))
+                                conv_type=f'SparseConv{self.conv_dim}d'))
+                    elif self.sparse_conv_first and j == 0 and i != 0:
+                        blocks_list.append(
+                            make_block(
+                                in_channels,
+                                out_channels,
+                                3,
+                                norm_cfg=norm_cfg,
+                                stride=2,
+                                padding=padding,
+                                indice_key=f'spconv{i + 1}',
+                                conv_type=f'SparseConv{self.conv_dim}d'))
                     else:
                         blocks_list.append(
                             SparseBasicBlock(
@@ -233,7 +280,7 @@ class SparseEncoder(nn.Module):
                             norm_cfg=norm_cfg,
                             padding=padding,
                             indice_key=f'subm{i + 1}',
-                            conv_type='SubMConv3d'))
+                            conv_type=f'SubMConv{self.conv_dim}d'))
                 in_channels = out_channels
             stage_name = f'encoder_layer{i + 1}'
             stage_layers = SparseSequential(*blocks_list)

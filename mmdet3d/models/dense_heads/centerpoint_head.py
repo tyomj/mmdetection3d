@@ -122,6 +122,134 @@ class SeparateHead(BaseModule):
 
 
 @MODELS.register_module()
+class SeparateTransposeHead(BaseModule):
+    """SeparateTransposeHead for CenterHead used in PillarNext. It runs
+    transpose convolution on the input feature map and the rest of the process
+    is the same as SeparateHead.
+
+    Args:
+        in_channels (int): Input channels for conv_layer.
+        heads (dict): Conv information.
+        head_conv (int, optional): Output channels.
+            Default: 64.
+        final_kernel (int, optional): Kernel size for the last conv layer.
+            Default: 1.
+        init_bias (float, optional): Initial bias. Default: -2.19.
+        conv_cfg (dict, optional): Config of conv layer.
+            Default: dict(type='Conv2d')
+        norm_cfg (dict, optional): Config of norm layer.
+            Default: dict(type='BN2d').
+        bias (str, optional): Type of bias. Default: 'auto'.
+        upsample_stride (int, optional): Stride of the last conv layer.
+    """
+
+    def __init__(self,
+                 in_channels,
+                 heads,
+                 head_conv=64,
+                 final_kernel=1,
+                 init_bias=-2.19,
+                 conv_cfg=dict(type='Conv2d'),
+                 norm_cfg=dict(type='BN2d'),
+                 bias='auto',
+                 upsample_stride=1,
+                 init_cfg=None,
+                 **kwargs):
+        assert init_cfg is None, 'To prevent abnormal initialization ' \
+            'behavior, init_cfg is not allowed to be set'
+        super(SeparateTransposeHead, self).__init__(init_cfg=init_cfg)
+        self.heads = heads
+        self.upsample_stride = upsample_stride
+        self.init_bias = init_bias
+
+        if upsample_stride > 1:
+            self.de_block = ConvModule(
+                in_channels,
+                head_conv,
+                kernel_size=upsample_stride,
+                stride=upsample_stride,
+                padding=0,
+                conv_cfg=dict(type='deconv'),
+                norm_cfg=dict(type='BN', eps=1e-3, momentum=0.01),
+            )
+            in_channels = head_conv
+        else:
+            self.de_block = nn.Identity()
+
+        for head in self.heads:
+            classes, num_conv = self.heads[head]
+            conv_layers = []
+            c_in = in_channels
+            for i in range(num_conv - 1):
+                conv_layers.append(
+                    ConvModule(
+                        c_in,
+                        head_conv,
+                        kernel_size=final_kernel,
+                        stride=1,
+                        padding=final_kernel // 2,
+                        bias=bias,
+                        conv_cfg=conv_cfg,
+                        norm_cfg=norm_cfg))
+                c_in = head_conv
+
+            conv_layers.append(
+                build_conv_layer(
+                    conv_cfg,
+                    head_conv,
+                    classes,
+                    kernel_size=final_kernel,
+                    stride=1,
+                    padding=final_kernel // 2,
+                    bias=True))
+            conv_layers = nn.Sequential(*conv_layers)
+
+            self.__setattr__(head, conv_layers)
+
+            if init_cfg is None:
+                self.init_cfg = dict(type='Kaiming', layer='Conv2d')
+
+    def init_weights(self):
+        """Initialize weights."""
+        super().init_weights()
+        for head in self.heads:
+            if head == 'heatmap':
+                self.__getattr__(head)[-1].bias.data.fill_(self.init_bias)
+        if self.upsample_stride > 1:
+            self.de_block.init_weights()
+
+    def forward(self, x):
+        """Forward function for SepHead.
+
+        Args:
+            x (torch.Tensor): Input feature map with the shape of
+                [B, 512, 128, 128].
+
+        Returns:
+            dict[str: torch.Tensor]: contains the following keys:
+
+                -reg （torch.Tensor): 2D regression value with the
+                    shape of [B, 2, H, W].
+                -height (torch.Tensor): Height value with the
+                    shape of [B, 1, H, W].
+                -dim (torch.Tensor): Size value with the shape
+                    of [B, 3, H, W].
+                -rot (torch.Tensor): Rotation value with the
+                    shape of [B, 2, H, W].
+                -vel (torch.Tensor): Velocity value with the
+                    shape of [B, 2, H, W].
+                -heatmap (torch.Tensor): Heatmap with the shape of
+                    [B, N, H, W].
+        """
+        x = self.de_block(x)
+        ret_dict = dict()
+        for head in self.heads:
+            ret_dict[head] = self.__getattr__(head)(x)
+
+        return ret_dict
+
+
+@MODELS.register_module()
 class DCNSeparateHead(BaseModule):
     r"""DCNSeparateHead for CenterHead.
 
